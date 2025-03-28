@@ -1,0 +1,9 @@
+---
+title: "Lab 6: Machine Learning in Hydrology"
+subtitle: "Using Tidymodels & CAMELS Data"
+author: Samantha Nauman
+format:
+  html:
+    code-fold: true
+    toc: true
+---
