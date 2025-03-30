@@ -4,6 +4,14 @@ subtitle: "Using Tidymodels & CAMELS Data"
 author: Samantha Nauman
 format:
   html:
-    code-fold: true
     toc: true
 ---
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(powerjoin)
+library(glue)
+library(vip)
+library(baguette)
+```
