@@ -7,6 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 <meta name="author" content="Samantha Nauman">
+<meta name="dcterms.date" content="2025-04-01">
 
 <title>Lab 6: Machine Learning in Hydrology</title>
 <style>
@@ -72,12 +73,10 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 
 </head>
 
-<body>
+<body class="fullcontent">
 
 <div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
-<div id="quarto-margin-sidebar" class="sidebar margin-sidebar zindex-bottom">
-  
-</div>
+
 <main class="content" id="quarto-document-content">
 
 <header id="title-block-header" class="quarto-title-block default">
@@ -97,6 +96,12 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
           </div>
   </div>
     
+    <div>
+    <div class="quarto-title-meta-heading">Published</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">April 1, 2025</p>
+    </div>
+  </div>
   
     
   </div>
@@ -106,6 +111,8 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </header>
 
 
+<section id="lab-set-up-data-download-doc-pdf" class="level3">
+<h3 class="anchored" data-anchor-id="lab-set-up-data-download-doc-pdf">Lab Set Up, Data Download, Doc PDF</h3>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stderr">
@@ -136,7 +143,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 ✖ dplyr::lag()      masks stats::lag()
 ✖ yardstick::spec() masks readr::spec()
 ✖ recipes::step()   masks stats::step()
-• Learn how to get started at https://www.tidymodels.org/start/</code></pre>
+• Use suppressPackageStartupMessages() to eliminate package startup messages</code></pre>
 </div>
 <div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(powerjoin)</span>
 <span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(glue)</span>
@@ -150,10 +157,83 @@ The following object is masked from 'package:utils':
     vi</code></pre>
 </div>
 <div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(baguette)</span>
-<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>root  <span class="ot">&lt;-</span> <span class="st">'https://gdex.ucar.edu/dataset/camels/file'</span></span>
-<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="fu">download.file</span>(<span class="st">'https://gdex.ucar.edu/dataset/camels/file/camels_attributes_v2.0.pdf'</span>, </span>
-<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>              <span class="st">'data/camels_attributes_v2.0.pdf'</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>root  <span class="ot">&lt;-</span> <span class="st">'https://gdex.ucar.edu/dataset/camels/file'</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="fu">download.file</span>(<span class="st">'https://gdex.ucar.edu/dataset/camels/file/camels_attributes_v2.0.pdf'</span>, </span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>              <span class="st">'data/camels_attributes_v2.0.pdf'</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
+</section>
+<section id="getting-basin-characteristics" class="level2">
+<h2 class="anchored" data-anchor-id="getting-basin-characteristics">Getting Basin Characteristics</h2>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>types <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"clim"</span>, <span class="st">"geol"</span>, <span class="st">"soil"</span>, <span class="st">"topo"</span>, <span class="st">"vege"</span>, <span class="st">"hydro"</span>)</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Where the files live online ...</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>remote_files  <span class="ot">&lt;-</span> <span class="fu">glue</span>(<span class="st">'{root}/camels_{types}.txt'</span>)</span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a><span class="co"># where we want to download the data ...</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>local_files   <span class="ot">&lt;-</span> <span class="fu">glue</span>(<span class="st">'data/camels_{types}.txt'</span>)</span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a><span class="fu">walk2</span>(remote_files, local_files, download.file, <span class="at">quiet =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a><span class="co"># Read and merge data</span></span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>camels <span class="ot">&lt;-</span> <span class="fu">map</span>(local_files, read_delim, <span class="at">show_col_types =</span> <span class="cn">FALSE</span>) </span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>camels <span class="ot">&lt;-</span> <span class="fu">power_full_join</span>(camels ,<span class="at">by =</span> <span class="st">'gauge_id'</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</section>
+<section id="question-1-your-turn" class="level1">
+<h1>Question 1: Your Turn</h1>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="co"># making a map of the sites</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="at">data =</span> camels, <span class="fu">aes</span>(<span class="at">x =</span> gauge_lon, <span class="at">y =</span> gauge_lat)) <span class="sc">+</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">borders</span>(<span class="st">"state"</span>, <span class="at">colour =</span> <span class="st">"gray50"</span>) <span class="sc">+</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="fu">aes</span>(<span class="at">color =</span> q_mean)) <span class="sc">+</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_gradient</span>(<span class="at">low =</span> <span class="st">"pink"</span>, <span class="at">high =</span> <span class="st">"dodgerblue"</span>) <span class="sc">+</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>  ggthemes<span class="sc">::</span><span class="fu">theme_map</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="lab6_files/figure-html/unnamed-chunk-3-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+<ul>
+<li>“zero_q_freq” represents the frequency of days with Q = 0 mm/day, reported as a percentage, where Q is daily discharge.</li>
+</ul>
+</section>
+<section id="question-2-aridity-and-p_mean-maps" class="level1">
+<h1>Question 2: Aridity and P_mean Maps</h1>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>aridity_map <span class="ot">&lt;-</span> <span class="fu">ggplot</span>(<span class="at">data =</span> camels, <span class="fu">aes</span>(<span class="at">x =</span> gauge_lon, <span class="at">y =</span> gauge_lat)) <span class="sc">+</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">borders</span>(<span class="st">"state"</span>, <span class="at">colour =</span> <span class="st">"black"</span>) <span class="sc">+</span></span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="fu">aes</span>(<span class="at">color =</span> aridity)) <span class="sc">+</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_gradient</span>(<span class="at">low =</span> <span class="st">"aquamarine"</span>, <span class="at">high =</span> <span class="st">"darkorchid"</span>) <span class="sc">+</span></span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"Longitude"</span>, <span class="at">y =</span> <span class="st">"Latitude"</span>, <span class="at">title =</span> <span class="st">"Aridity Gradient Across the U.S."</span>) <span class="sc">+</span></span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>  ggthemes<span class="sc">::</span><span class="fu">theme_map</span>()</span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>p_mean_map <span class="ot">&lt;-</span> <span class="fu">ggplot</span>(<span class="at">data =</span> camels, <span class="fu">aes</span>(<span class="at">x =</span> gauge_lon, <span class="at">y =</span> gauge_lat)) <span class="sc">+</span></span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">borders</span>(<span class="st">"state"</span>, <span class="at">colour =</span> <span class="st">"black"</span>) <span class="sc">+</span></span>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="fu">aes</span>(<span class="at">color =</span> p_mean)) <span class="sc">+</span></span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_gradient</span>(<span class="at">low =</span> <span class="st">"bisque2"</span>, <span class="at">high =</span> <span class="st">"darkolivegreen"</span>) <span class="sc">+</span></span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"Longitude"</span>, <span class="at">y =</span> <span class="st">"Latitude"</span>, <span class="at">title =</span> <span class="st">"Mean Daily Precipitation Across the U.S."</span>) <span class="sc">+</span></span>
+<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a>  ggthemes<span class="sc">::</span><span class="fu">theme_map</span>()</span>
+<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a>sites_map <span class="ot">&lt;-</span> ggpubr<span class="sc">::</span><span class="fu">ggarrange</span>(aridity_map, p_mean_map, <span class="at">ncol =</span> <span class="dv">2</span>)</span>
+<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(sites_map)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="lab6_files/figure-html/unnamed-chunk-4-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>ggplot2<span class="sc">::</span><span class="fu">ggsave</span>(<span class="at">filename =</span> <span class="st">"imgs/sites_map.png"</span>, <span class="at">plot =</span> sites_map, <span class="at">width =</span> <span class="dv">10</span>, <span class="at">height =</span> <span class="dv">6</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<section id="model-preparation" class="level3">
+<h3 class="anchored" data-anchor-id="model-preparation">Model Preparation</h3>
+</section>
+</section>
 
 </main>
 <!-- /main column -->

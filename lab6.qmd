@@ -2,11 +2,12 @@
 title: "Lab 6: Machine Learning in Hydrology"
 subtitle: "Using Tidymodels & CAMELS Data"
 author: Samantha Nauman
-format:
-  html:
-    toc: true
+date: "2025-04-01"
+format: html
+execute: 
+  echo: true
 ---
-
+### Lab Set Up, Data Download, Doc PDF
 ```{r}
 library(tidyverse)
 library(tidymodels)
@@ -14,7 +15,56 @@ library(powerjoin)
 library(glue)
 library(vip)
 library(baguette)
+library(ggplot2)
 root  <- 'https://gdex.ucar.edu/dataset/camels/file'
 download.file('https://gdex.ucar.edu/dataset/camels/file/camels_attributes_v2.0.pdf', 
               'data/camels_attributes_v2.0.pdf')
 ```
+## Getting Basin Characteristics
+```{r}
+types <- c("clim", "geol", "soil", "topo", "vege", "hydro")
+
+# Where the files live online ...
+remote_files  <- glue('{root}/camels_{types}.txt')
+# where we want to download the data ...
+local_files   <- glue('data/camels_{types}.txt')
+
+walk2(remote_files, local_files, download.file, quiet = TRUE)
+
+# Read and merge data
+camels <- map(local_files, read_delim, show_col_types = FALSE) 
+
+camels <- power_full_join(camels ,by = 'gauge_id')
+```
+# Question 1: Your Turn
+```{r}
+# making a map of the sites
+ggplot(data = camels, aes(x = gauge_lon, y = gauge_lat)) +
+  borders("state", colour = "gray50") +
+  geom_point(aes(color = q_mean)) +
+  scale_color_gradient(low = "pink", high = "dodgerblue") +
+  ggthemes::theme_map()
+```
+- "zero_q_freq" represents the frequency of days with Q = 0 mm/day, reported as a percentage, where Q is daily discharge. 
+
+# Question 2: Aridity and P_mean Maps
+```{r}
+aridity_map <- ggplot(data = camels, aes(x = gauge_lon, y = gauge_lat)) +
+  borders("state", colour = "black") +
+  geom_point(aes(color = aridity)) +
+  scale_color_gradient(low = "aquamarine", high = "darkorchid") +
+  labs(x = "Longitude", y = "Latitude", title = "Aridity Gradient Across the U.S.") +
+  ggthemes::theme_map()
+
+p_mean_map <- ggplot(data = camels, aes(x = gauge_lon, y = gauge_lat)) +
+  borders("state", colour = "black") +
+  geom_point(aes(color = p_mean)) +
+  scale_color_gradient(low = "bisque2", high = "darkolivegreen") +
+  labs(x = "Longitude", y = "Latitude", title = "Mean Daily Precipitation Across the U.S.") +
+  ggthemes::theme_map()
+
+sites_map <- ggpubr::ggarrange(aridity_map, p_mean_map, ncol = 2)
+print(sites_map)
+ggplot2::ggsave(filename = "imgs/sites_map.png", plot = sites_map, width = 10, height = 6)
+```
+### Model Preparation
