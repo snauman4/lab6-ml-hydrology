@@ -300,14 +300,126 @@ ggplot(xgb_workflow, aes(x = logQmean, y = .pred, colour = aridity)) +
   scale_color_viridis_c() +
   geom_point() +
   geom_abline() +
+  labs(title = "XgBoost Model") +
   theme_bw()
 
 ggplot(nn_workflow, aes(x = logQmean, y = .pred, colour = aridity)) +
   scale_color_viridis_c() +
   geom_point() +
   geom_abline() +
+  labs(title = "Neural Network Model") +
   theme_linedraw()
 
 autoplot(wf)
 ```
-- Out of the 4 models, I would move forward with ___ because____
+- Out of the linear regression, random forest, boosted tree, and neural network models, I would move forward with the **xgboost model**. This is because the results are right on the line of best fit (1:1), meaning the metrics have more significance and are less likely to have residual errors. 
+
+# Question 4: Build your own
+
+## Data Splitting 
+```{r}
+# set a new seed for reproducible
+set.seed(123456) # new sequence
+
+# create initial 75% training and 25% testing split and extract the sets
+camels_strata <- initial_split(camels, prop = .75)
+
+train_camels <- training(camels_strata)
+test_camels <- testing(camels_strata)
+
+# build a 10-fold CV dataset
+camels_folds <-
+  vfold_cv(train_camels, v = 10)
+```
+## Recipe
+```{r}
+# define a formula you want to use
+formula <- logQmean ~ p_mean + aridity + high_prec_dur
+
+# build a recipe
+train_camels <- na.omit(train_camels)
+rec_camels <-  recipe(logQmean ~ p_mean + aridity + high_prec_dur, data = train_camels) %>%
+  step_log(all_predictors()) %>%
+  step_interact(terms = ~ aridity:p_mean) %>%
+  step_naomit(all_predictors(), all_outcomes()) %>%
+  step_zv(all_predictors()) 
+
+# prep the data
+baked_camels <- prep(rec_camels, train_camels) %>%
+  bake(new_data = NULL)
+
+# check the recipe (should be zero)
+sum(is.na(baked_camels))
+sum(is.infinite(as.matrix(baked_camels))) 
+```
+- The formula was chose was based on the inclusion of the predictor variables that I believe influence mean daily discharge: p_mean, aridity, and logQmean. Precipitation adds water to the system, while aridity indicates how dry an area is (drier areas usually have lower logQmean). I also expect that more frequent heavy rain events (high_prec_dur) will lead to higher average discharge. 
+
+## Define 3 Models
+```{r}
+# define a random forest model
+q4_rf_mod <- rand_forest() %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+# 2 other models of choice
+q4_xgb_mod <- boost_tree() %>%
+  set_engine("xgboost") %>%
+  set_mode("regression") 
+
+q4_lm_mod <- linear_reg() %>%
+  set_engine("lm") %>%
+  set_mode("regression") 
+```
+## Workflow Set
+```{r}
+# create workflow objects, add the recipe, add the models
+q4_rf_wf <- workflow() %>%
+  add_recipe(rec_camels) %>%
+  add_model(q4_rf_mod)
+
+q4_xgb_wf <- workflow() %>%
+  add_recipe(rec_camels) %>%
+  add_model(q4_xgb_mod)
+
+q4_lm_wf <- workflow() %>%
+  add_recipe(rec_camels) %>%
+  add_model(q4_lm_mod) 
+
+# fit the model to the resamples
+rf_results <- fit_resamples(q4_rf_wf, resamples = camels_folds)
+xgb_results <- fit_resamples(q4_xgb_wf, resamples = camels_folds) 
+lm_results <- fit_resamples(q4_lm_wf, resamples = camels_folds) 
+```
+## Evaluation
+```{r}
+# use autoplot and rank_results to compare the models
+q4_wf <- workflow_set(list(rec_camels), list(q4_rf_mod, q4_xgb_mod, q4_lm_mod)) %>%
+  workflow_map('fit_resamples', resamples = camels_cv)
+
+autoplot(q4_wf)
+
+rank_results(wf, rank_metric = "rsq", select_best = TRUE)
+```
+- Out of the random forest, linear, and xgboost model, I think that the random forest model is the strongest performer because it shows the lowest RMSE and the highest RSQ compared to the others, capturing the relationship between predictors and response very well. These metrics indicate that the random forest's predictions are close to the actual values and explain a large variance in the data. This means it consistently makes accurate predictions and captures the underlying patterns in the dataset better than the other models.
+
+## Extract and Evaluate
+```{r}
+# build a workflow with favorite model, recipe, and training data
+final_wf <- workflow() %>%
+  add_recipe(rec_camels) %>%
+  add_model(q4_rf_mod) %>%
+  fit(data = train_camels) # use fit to fit all training data to the model
+
+# use augment to make preditions on the test data
+final_wf_data <- augment(final_wf, new_data = test_camels)
+
+#create a plot of the observed vs predicted values
+ggplot(final_wf_data, aes(x = .pred, y = logQmean, colour = logQmean)) +
+  scale_color_gradient2(low = "blue3", mid = "yellow", high = "chartreuse") +
+  geom_point() +
+  geom_abline(linetype = 2) +
+  labs(title = "Random Forest Model: Observed vs. Predicted",
+       x = "Predicted Log Mean Flow",
+       y = "Observed Log Mean Flow?")
+```
+These results suggest that the random forest model performs well on predicting logQmean based on the predictors chosen. Most of the points are along the 1:1 line, indicating that the model's predicted values match the observed values closely, accurately capturing the relationship between the predictors and logQmean effectively.
