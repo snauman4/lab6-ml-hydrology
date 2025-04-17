@@ -1,0 +1,234 @@
+---
+title: "Lab 8: Machine Learning in Hydrology"
+subtitle: "Hyperparameter Tuning"
+author: Samantha Nauman
+date: "2025-04-11"
+format: html
+execute: 
+  echo: true
+---
+## Data Import/Tidy/Transform
+```{r}
+# loading in the packages
+library(tidyverse)
+library(tidymodels)
+library(powerjoin)
+library(glue)
+library(vip)
+library(baguette)
+library(ggplot2)
+library(rsample)
+library(visdat)
+library(ggpubr)
+library(patchwork)
+
+# loading in and merging data
+root  <- 'https://gdex.ucar.edu/dataset/camels/file'
+download.file('https://gdex.ucar.edu/dataset/camels/file/camels_attributes_v2.0.pdf', 
+              'data/camels_attributes_v2.0.pdf')
+types <- c("clim", "geol", "soil", "topo", "vege", "hydro")
+
+# Where the files live online ...
+remote_files  <- glue('{root}/camels_{types}.txt')
+
+# where we want to download the data ...
+local_files   <- glue('data/camels_{types}.txt')
+walk2(remote_files, local_files, download.file, quiet = TRUE)
+
+# Read and merge data
+camels <- map(local_files, read_delim, show_col_types = FALSE) 
+camels <- power_full_join(camels ,by = 'gauge_id')
+
+# clean the data
+summary(camels)
+ls(camels)
+
+camels <- na.omit(camels)
+```
+## Data Splitting
+```{r}
+# set seed to ensure random process is reproducable
+set.seed(321)
+
+# split the data
+camels <- camels %>%
+  mutate(logQmean = log(q_mean))
+
+camels_split <- initial_split(camels, prop = 0.8)
+camels_train <- training(camels_split)
+camels_test <- testing(camels_split)
+
+```
+## Feature Engineering
+```{r}
+# recipe to predict q_mean from training data
+rec <-  recipe(logQmean ~ aridity + p_mean, data = camels_train) %>%
+  # Log transform the predictor variables (aridity and p_mean)
+  step_log(all_predictors()) %>%
+  # Add an interaction term between aridity and p_mean
+  step_interact(terms = ~ aridity:p_mean) |> 
+  # Drop any rows with missing values in the pred
+  step_naomit(all_predictors(), all_outcomes())
+```
+## Resampling and Model Testing
+```{r}
+# build resamples
+camels_cv <- vfold_cv(camels_train, v = 10)
+
+# build 3 candidate models
+xgb_mod <- boost_tree() %>%
+  set_engine("xgboost") %>%
+  set_mode("regression") 
+
+dt_mod <- decision_tree() %>%
+  set_engine("rpart") %>%
+  set_mode("regression") 
+
+rf_mod <- rand_forest() %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+# test the models
+wf <- workflow_set(list(rec), list(boost = xgb_mod,
+                                   dt = dt_mod,
+                                   ranger = rf_mod)) %>%
+  workflow_map(resamples = camels_cv,
+               metrics = metric_set(mae, rsq, rmse))
+
+autoplot(wf)
+
+rank_results(wf, rank_metric = "rsq", select_best = TRUE)
+
+# model selection
+```
+_Model Selection Reasoning:_ Based on the models chosen and the ranked metrics from the autoplot, the random forest model seems the most fitting due to it having the lowest RMSE, indicating that the model's predictions are closest to the actual values on average. In addition, from the ranking it is ranked first for mae, rmse, and rsq out of the other metrics. 
+
+_Selected Model Description:_ The random forest model is a "random forest" type, "regression" mode, and the "ranger" engine. I believe this model is best fit for this problem because of its simplicity combined with high predictive accuracy, making it promising for predicting logQmean. In addition, random forest models are known for their robustness against overfitting. 
+
+## Model Tuning
+```{r}
+# build a model for your chosen specification
+rf_tune <- rand_forest(trees = tune(), min_n = tune()) %>%
+  set_engine("ranger") %>%
+  set_mode("regression") 
+
+# create a workflow
+wf_tune <- workflow(rec,
+                    rand_forest(mode = "regression",
+                                engine = "ranger",
+                                trees = tune(),
+                                min_n = tune()))
+
+wf_tune = workflow() %>%
+  add_recipe(rec) %>%
+  add_model(rf_tune)
+
+# check the tunable values/ranges
+dials <- extract_parameter_set_dials(wf_tune)
+dials$object
+
+# define the search space
+my.grid <- dials %>%
+  update(trees = trees(c(1, 2000))) %>%
+  grid_latin_hypercube(size = 25)
+
+# tune the model
+model_params <-  tune_grid(
+    wf_tune,
+    resamples = camels_cv,
+    grid = my.grid,
+    metrics = metric_set(rmse, rsq, mae),
+    control = control_grid(save_pred = TRUE)
+  )
+
+autoplot(model_params)
+```
+_Model Tuning Description:_ From the plot of the model tuning, the first 2 rows show that as minimal node size increases, mae and rmse decreases. In the third row, as minimal node size increases, rsq also increases, indicating a positive relationship. However, it seems that the number of trees does not display any clear pattern nor show a relationship with mae, rmse, or rsq. 
+```{r}
+# check the skill of the tuned model
+  # collect_metrics
+tree_metrics = metric_set(rsq, rmse, mae)
+hp_best <- select_best(model_params, metric = "mae")
+finalize <- finalize_workflow(wf_tune, hp_best)
+final_fit <- last_fit(finalize, camels_split, metrics = tree_metrics)
+collect_metrics(final_fit)
+```
+_Collect_Metrics Description:_ From using collect_metrics to check the skill of the final tuned model, mae is the lowest, indicating the smallest average prediction error. The rsq is the highest, showing a strong correlation between the model's predictions and actual values. Lastly, rmse is moderate, suggesting that the model has an acceptable level of error. Furthermore, these metrics suggest that the model is performing well with a good balance between predictive accuracy and low error. 
+```{r}
+  # show_best
+show_best(model_params, metric = "mae")
+```
+_Show_best Description:_ From using show_best to show the best performing model based on the mean absolute error, the first row displays that model 17 is the best, with a standard error of 0.016. In addition, model 17 had 1803 trees with a min_n of 23.  
+```{r}
+  # select_best
+hp_best <- select_best(model_params, metric = "mae")
+
+  # finalize your model
+final_wf <- finalize_workflow(wf_tune, hp_best)
+```
+## Final Model Verification
+```{r}
+# use last_fit to fit the finalized workflow to the original split
+final_fit <- last_fit(finalize, camels_split, metrics = tree_metrics)
+
+# use collect_metrics to check the performance of the final model on the TEST data
+collect_metrics(final_fit)
+```
+_Collect_metrics Test Interpretation:_ Test data was slightly better. The final model performs well on the test data, but benchmarks very slightly worse on the test set than on the training set. The model returned similar rsq values on both training and testing (0.7546 vs. 0.7525), which indicates a strong correlation in both cases. However, its rmse was 0.6637 on the training data and 0.6664 on the testing data, so the model for training data is slightly more acccurate. Similarly, the mae rose only from 0.4209 (train) to 0.4220 (test), remaining very low overall. 
+```{r}
+# use collect_predictions to check the predictions of the final model on the test data
+collect_predictions(final_fit) %>%
+  ggplot(aes(x = .pred, y = logQmean)) +
+  geom_point() +
+  scale_color_viridis_c() +
+  geom_abline() +
+  geom_smooth(method = "lm") +
+  theme_linedraw() +
+  labs(title = "Final Fit",
+       x = "Predicted (log10)",
+       y = "Actual (log10)")
+```
+## Building a Map!
+```{r}
+# pass the final fit to the augment function to make predictions on the full, cleaned data
+final_pred = fit(finalize, data = camels) %>%
+  augment(new_data = camels)
+
+# use mutate to calculate the residuals of the predictions (predicted - actual)^2
+residuals <- final_pred %>%
+  mutate(residual = (.pred - logQmean)^2)
+
+# map predictions
+pred_map <- ggplot(data = final_pred, aes(x = gauge_lon, y = gauge_lat)) +
+  borders("state", colour = "black") +
+  geom_point(aes(color = .pred), size = 1.5) +
+  scale_color_gradient(low  = "lightcyan", 
+                       high = "darkblue",
+                       name = "Predicted\nlogQmean") +
+  labs(x     = "Longitude",
+       y     = "Latitude",
+       title = "Predicted logQmean Across the U.S.") +
+  ggthemes::theme_map()
+
+# map residuals
+resid_map <- ggplot(data = residuals, aes(x = gauge_lon, y = gauge_lat)) +
+  borders("state", colour = "black") +
+  geom_point(aes(color = residual), size = 1.5) +
+  scale_color_gradient(low  = "mistyrose", 
+                       high = "darkred",
+                       name = "Residuals") +
+  labs(x     = "Longitude",
+       y     = "Latitude",
+       title = "Residuals Across the U.S.") +
+  ggthemes::theme_map()
+
+# combine the two maps into one figure
+combined_map <- pred_map + resid_map +
+  plot_annotation(
+    title = "Predictions Across CONUS",
+    theme = theme(
+      plot.title = element_text(size = 16, face = "bold", hjust = 0.5)
+    )
+  )
+print(combined_map)
+```
