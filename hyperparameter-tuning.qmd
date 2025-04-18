@@ -21,6 +21,8 @@ library(rsample)
 library(visdat)
 library(ggpubr)
 library(patchwork)
+library(skimr)
+library(dials)
 
 # loading in and merging data
 root  <- 'https://gdex.ucar.edu/dataset/camels/file'
@@ -40,15 +42,13 @@ camels <- map(local_files, read_delim, show_col_types = FALSE)
 camels <- power_full_join(camels ,by = 'gauge_id')
 
 # clean the data
-summary(camels)
-ls(camels)
-
 camels <- na.omit(camels)
+skim(camels)
 ```
 ## Data Splitting
 ```{r}
 # set seed to ensure random process is reproducable
-set.seed(321)
+set.seed(123)
 
 # split the data
 camels <- camels %>%
@@ -57,7 +57,6 @@ camels <- camels %>%
 camels_split <- initial_split(camels, prop = 0.8)
 camels_train <- training(camels_split)
 camels_test <- testing(camels_split)
-
 ```
 ## Feature Engineering
 ```{r}
@@ -108,29 +107,49 @@ _Selected Model Description:_ The random forest model is a "random forest" type,
 ## Model Tuning
 ```{r}
 # build a model for your chosen specification
-rf_tune <- rand_forest(trees = tune(), min_n = tune()) %>%
+rf_tune <- rand_forest(
+  mode = "regression",
+  mtry = tune(),
+  min_n = tune()) %>%
   set_engine("ranger") %>%
   set_mode("regression") 
 
 # create a workflow
-wf_tune <- workflow(rec,
-                    rand_forest(mode = "regression",
-                                engine = "ranger",
-                                trees = tune(),
-                                min_n = tune()))
+rf_grid <- grid_regular(
+  mtry(range = c(1,5)),
+  min_n(range = c(2, 10)),
+  levels = 5
+)
+rf_grid
 
-wf_tune = workflow() %>%
+wf_tune <- workflow() %>%
   add_recipe(rec) %>%
   add_model(rf_tune)
+wf_tune
 
-# check the tunable values/ranges
+rf_tune_results <- wf_tune %>%
+  tune_grid(
+    resamples = camels_cv,
+    grid = rf_grid
+  )
+autoplot(rf_tune_results)
+
+# define the search space/dials
 dials <- extract_parameter_set_dials(wf_tune)
-dials$object
+dials <- update(dials, mtry = mtry(range = c(1, 10)))
+dials <- update(dials, min_n = min_n(range = c(2, 15)))
+my_grid <- grid_space_filling(dials, size = 25)
+dials
 
-# define the search space
-my.grid <- dials %>%
-  update(trees = trees(c(1, 2000))) %>%
-  grid_latin_hypercube(size = 25)
+dials <- extract_parameter_set_dials(wf_tune)
+dials
+
+dials$object 
+
+dials <- extract_parameter_set_dials(wf_tune)
+dials <- finalize(dials, camels_train)
+my.grid <- grid_space_filling(dials, size = 25)
+my.grid
 
 # tune the model
 model_params <-  tune_grid(
@@ -143,22 +162,18 @@ model_params <-  tune_grid(
 
 autoplot(model_params)
 ```
-_Model Tuning Description:_ From the plot of the model tuning, the first 2 rows show that as minimal node size increases, mae and rmse decreases. In the third row, as minimal node size increases, rsq also increases, indicating a positive relationship. However, it seems that the number of trees does not display any clear pattern nor show a relationship with mae, rmse, or rsq. 
+_Model Tuning Description:_ From the plot of the model tuning, the first 2 rows show that as minimal node size increases, mae and rmse decreases. In the third row, as minimal node size increases, rsq also increases, indicating a positive relationship. The similarity between mae and rmse with zero outliers indicates that the random forest model was a good choice due to consistency with little to no outliers. 
 ```{r}
 # check the skill of the tuned model
   # collect_metrics
-tree_metrics = metric_set(rsq, rmse, mae)
-hp_best <- select_best(model_params, metric = "mae")
-finalize <- finalize_workflow(wf_tune, hp_best)
-final_fit <- last_fit(finalize, camels_split, metrics = tree_metrics)
-collect_metrics(final_fit)
+model_params %>% collect_metrics()
 ```
-_Collect_Metrics Description:_ From using collect_metrics to check the skill of the final tuned model, mae is the lowest, indicating the smallest average prediction error. The rsq is the highest, showing a strong correlation between the model's predictions and actual values. Lastly, rmse is moderate, suggesting that the model has an acceptable level of error. Furthermore, these metrics suggest that the model is performing well with a good balance between predictive accuracy and low error. 
+_Collect_Metrics Description:_ From using collect_metrics to check the skill of the final tuned model, there is stable performance across the 25 tuning combinations. When gathering the average of rmse, mae, and rsq, it is very close to each individual mean, indicating that the forest performs well with the choices of the hyperparameter.  
 ```{r}
   # show_best
 show_best(model_params, metric = "mae")
 ```
-_Show_best Description:_ From using show_best to show the best performing model based on the mean absolute error, the first row displays that model 17 is the best, with a standard error of 0.016. In addition, model 17 had 1803 trees with a min_n of 23.  
+_Show_best Description:_ From using show_best to show the best performing model based on the mean absolute error, the first row displays that model 21 is the best, with a standard error of 0.021. In addition, model 17 displays a mtry of 49 (predictors) and a min_n of 38 (minimun node size). This means that the the random forest will randomly sample 49 different predictor variables and chooses the best split among them, and the minimum node must contain at least 38 observations before it's allowed to split. 
 ```{r}
   # select_best
 hp_best <- select_best(model_params, metric = "mae")
@@ -169,58 +184,54 @@ final_wf <- finalize_workflow(wf_tune, hp_best)
 ## Final Model Verification
 ```{r}
 # use last_fit to fit the finalized workflow to the original split
-final_fit <- last_fit(finalize, camels_split, metrics = tree_metrics)
+final_fit <- last_fit(final_wf, camels_split)
 
 # use collect_metrics to check the performance of the final model on the TEST data
-collect_metrics(final_fit)
+final_metrics <- collect_metrics(final_fit)
+final_metrics
 ```
-_Collect_metrics Test Interpretation:_ Test data was slightly better. The final model performs well on the test data, but benchmarks very slightly worse on the test set than on the training set. The model returned similar rsq values on both training and testing (0.7546 vs. 0.7525), which indicates a strong correlation in both cases. However, its rmse was 0.6637 on the training data and 0.6664 on the testing data, so the model for training data is slightly more acccurate. Similarly, the mae rose only from 0.4209 (train) to 0.4220 (test), remaining very low overall. 
+_Collect_metrics Test Interpretation:_ The results show a final rmse of 0.624 and an rsq od 0.790. Lower rmse indicated that the predicted values are close to the actual values with about a 79% of variability in the test data. This shows that the model was a strong choice by the test data metrics. Considering the rmse is lower in training data rather than the test data, the training data's predictions are closer to reality, making it slightly better. 
 ```{r}
 # use collect_predictions to check the predictions of the final model on the test data
-collect_predictions(final_fit) %>%
-  ggplot(aes(x = .pred, y = logQmean)) +
+final_pred <- collect_predictions(final_fit) 
+
+ggplot(final_pred, aes(x = .pred, y = logQmean)) +
   geom_point() +
   scale_color_viridis_c() +
-  geom_abline() +
-  geom_smooth(method = "lm") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black") +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
   theme_linedraw() +
-  labs(title = "Final Fit",
-       x = "Predicted (log10)",
-       y = "Actual (log10)")
+  labs(title = "Predicted vs. Actual Streamflow",
+       x = "Predicted Streamflow (logQmean)",
+       y = "Actual Streamflow (logQmean)")
 ```
 ## Building a Map!
 ```{r}
 # pass the final fit to the augment function to make predictions on the full, cleaned data
-final_pred = fit(finalize, data = camels) %>%
-  augment(new_data = camels)
+final_model_full <- fit(final_wf, data = camels)
+predictions <- augment(final_model_full, new_data = camels)
 
 # use mutate to calculate the residuals of the predictions (predicted - actual)^2
-residuals <- final_pred %>%
-  mutate(residual = (.pred - logQmean)^2)
+residuals <- predictions %>%
+  mutate(residuals = (.pred - q_mean)^2)
 
 # map predictions
-pred_map <- ggplot(data = final_pred, aes(x = gauge_lon, y = gauge_lat)) +
-  borders("state", colour = "black") +
-  geom_point(aes(color = .pred), size = 1.5) +
-  scale_color_gradient(low  = "lightcyan", 
-                       high = "darkblue",
-                       name = "Predicted\nlogQmean") +
-  labs(x     = "Longitude",
-       y     = "Latitude",
-       title = "Predicted logQmean Across the U.S.") +
-  ggthemes::theme_map()
+pred_map <- ggplot(predictions, aes(x = gauge_lon, y = gauge_lat, color = .pred)) + borders("state", colour = "black", fill = NA) +
+  geom_point(alpha = 0.6) +
+  scale_color_viridis_c(option = "C") +
+  labs(title = "Predicted Streamflow (q_mean)", color = "Predicted Value") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
 
 # map residuals
-resid_map <- ggplot(data = residuals, aes(x = gauge_lon, y = gauge_lat)) +
-  borders("state", colour = "black") +
-  geom_point(aes(color = residual), size = 1.5) +
-  scale_color_gradient(low  = "mistyrose", 
-                       high = "darkred",
-                       name = "Residuals") +
-  labs(x     = "Longitude",
-       y     = "Latitude",
-       title = "Residuals Across the U.S.") +
-  ggthemes::theme_map()
+resid_map <- ggplot(residuals, aes(x = gauge_lon, y = gauge_lat, color = residuals)) + borders("state", colour = "black", fill = NA) +
+  geom_point(alpha = 0.6) +
+  scale_color_viridis_c(option = "C") +
+  labs(title = "Residuals of Predictions ", color = "Residuals") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+print(resid_map)
 
 # combine the two maps into one figure
 combined_map <- pred_map + resid_map +
